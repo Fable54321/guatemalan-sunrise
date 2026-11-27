@@ -41,6 +41,42 @@ const isEmpty = (value: AnswerValue | undefined) =>
 const isValidPhone = (phone: string) =>
   phone.trim().length <= 30 && (phone.match(/\d/g)?.length ?? 0) >= 7
 
+const normalizeQuestionText = (text: string) =>
+  text.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase()
+
+const mentionsOtherJob = (question: InterviewQuestion) => {
+  const text = normalizeQuestionText(question.question_text)
+  const describesAdditionalJob = ["autre", "ailleurs", "second", "deuxieme"]
+    .some((term) => text.includes(term))
+  return describesAdditionalJob && ["emploi", "travail", "job"].some((term) => text.includes(term))
+}
+
+const isConditionalDetailPrompt = (question: InterviewQuestion) => {
+  const text = normalizeQuestionText(question.question_text)
+  return text.includes("si oui")
+}
+
+function findOtherJobDependency(questions: InterviewQuestion[]) {
+  const trigger = questions.find(
+    (question) => question.answer_type === "boolean" && mentionsOtherJob(question),
+  )
+  if (!trigger) return null
+
+  const followingTextQuestions = questions
+    .filter(
+      (question) =>
+        question.section === trigger.section &&
+        question.answer_type === "text" &&
+        question.display_order > trigger.display_order,
+    )
+    .sort((left, right) => left.display_order - right.display_order)
+
+  const detail = followingTextQuestions.find(mentionsOtherJob)
+    ?? followingTextQuestions.find(isConditionalDetailPrompt)
+
+  return detail ? { triggerId: trigger.id, detailId: detail.id } : null
+}
+
 function ratingBounds(question: InterviewQuestion) {
   const options = question.options
   if (!options || Array.isArray(options)) return { min: 1, max: 5 }
@@ -55,11 +91,13 @@ function QuestionField({
   question,
   value,
   error,
+  required = question.is_required,
   onChange,
 }: {
   question: InterviewQuestion
   value?: AnswerValue
   error?: string
+  required?: boolean
   onChange: (value: AnswerValue | undefined) => void
 }) {
   const inputId = `question-${question.id}`
@@ -78,7 +116,7 @@ function QuestionField({
         <label htmlFor={inputId} className="text-base font-semibold leading-6 text-[#24351e]">
           {question.question_text}
         </label>
-        {question.is_required && (
+        {required && (
           <span className="mt-0.5 text-sm font-bold text-[#d95726]" aria-label="requis">*</span>
         )}
       </div>
@@ -392,6 +430,13 @@ export default function InterviewForm() {
   const currentQuestions = currentSection
     ? questions.filter((question) => question.section === currentSection)
     : []
+  const otherJobDependency = useMemo(() => findOtherJobDependency(questions), [questions])
+  const otherJobSelected = otherJobDependency
+    ? answers[otherJobDependency.triggerId] === true
+    : false
+  const visibleCurrentQuestions = currentQuestions.filter(
+    (question) => question.id !== otherJobDependency?.detailId || otherJobSelected,
+  )
   const totalSteps = sections.length + 1
  
 
@@ -418,8 +463,10 @@ export default function InterviewForm() {
       }
     }
 
-    currentQuestions.forEach((question) => {
-      if (question.is_required && isEmpty(answers[question.id])) {
+    visibleCurrentQuestions.forEach((question) => {
+      const isRequired = question.is_required
+        || (question.id === otherJobDependency?.detailId && otherJobSelected)
+      if (isRequired && isEmpty(answers[question.id])) {
         errors[String(question.id)] = "Cette réponse est requise."
       }
     })
@@ -447,11 +494,15 @@ export default function InterviewForm() {
       phoneNumber2: phoneNumber2.trim(),
     }
     const clientSubmissionId = crypto.randomUUID()
+    const submittedAnswers = { ...answers }
+    if (otherJobDependency && !otherJobSelected) {
+      delete submittedAnswers[otherJobDependency.detailId]
+    }
     const saveForLater = async () => {
       await queueInterview({
         clientSubmissionId,
         candidate,
-        answers,
+        answers: submittedAnswers,
         createdAt: new Date().toISOString(),
         attempts: 0,
       })
@@ -467,7 +518,7 @@ export default function InterviewForm() {
         return
       }
 
-      await createInterview(candidate, answers, clientSubmissionId)
+      await createInterview(candidate, submittedAnswers, clientSubmissionId)
       await clearInterviewDraft()
       setCompletionStatus("saved")
     } catch (error) {
@@ -488,15 +539,21 @@ export default function InterviewForm() {
 
   const updateAnswer = (questionId: number, value: AnswerValue | undefined) => {
     setAnswers((current) => {
-      if (value !== undefined) return { ...current, [questionId]: value }
-
-      const next = { ...current }
-      delete next[questionId]
+      const next = value === undefined
+        ? { ...current }
+        : { ...current, [questionId]: value }
+      if (value === undefined) delete next[questionId]
+      if (questionId === otherJobDependency?.triggerId && value !== true) {
+        delete next[otherJobDependency.detailId]
+      }
       return next
     })
     setFieldErrors((current) => {
       const next = { ...current }
       delete next[String(questionId)]
+      if (questionId === otherJobDependency?.triggerId && value !== true) {
+        delete next[String(otherJobDependency.detailId)]
+      }
       return next
     })
   }
@@ -579,7 +636,7 @@ export default function InterviewForm() {
           </div>
         )}
         <div className="mb-8">
-          <div className="mb-3 flex items-center justify-between text-xs font-bold text-[#687565]">
+          <div className="mb-3 flex items-center justify-between text-sm font-bold text-[#000000]">
             <span>Étape {step + 1} sur {totalSteps}</span>
            
           </div>
@@ -615,12 +672,7 @@ export default function InterviewForm() {
 
             {step === 0 ? (
               <section className="rounded-2xl border border-[#dfe8d8] bg-white p-6 shadow-[0_18px_50px_rgba(43,70,28,0.06)] sm:p-8">
-                <div className="mb-6 border-b border-[#e6ece1] pb-5">
-                  <h2 className="text-lg font-black text-[#2d4225]">Informations du candidat</h2>
-                  <p className="mt-1 text-sm leading-6 text-[#758271]">
-                    Saisissez les coordonnées qui permettent d’identifier et de joindre le candidat.
-                  </p>
-                </div>
+
 
                 <div className="grid gap-5 sm:grid-cols-2">
                   <div className="sm:col-span-2">
@@ -686,12 +738,15 @@ export default function InterviewForm() {
               </section>
             ) : (
               <div className="space-y-2">
-                {currentQuestions.map((question) => (
+                {visibleCurrentQuestions.map((question) => (
                   <QuestionField
                     key={question.id}
                     question={question}
                     value={answers[question.id]}
                     error={fieldErrors[String(question.id)]}
+                    required={question.is_required || (
+                      question.id === otherJobDependency?.detailId && otherJobSelected
+                    )}
                     onChange={(value) => updateAnswer(question.id, value)}
                   />
                 ))}
