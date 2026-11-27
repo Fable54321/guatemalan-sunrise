@@ -11,6 +11,7 @@ const DRAFT_STORE = "drafts"
 const PENDING_STORE = "pendingInterviews"
 const QUESTIONS_CACHE_KEY = "activeQuestions"
 const CURRENT_DRAFT_ID = "currentInterview"
+const pendingInterviewsChanged = new EventTarget()
 
 type CacheRecord<T> = {
   key: string
@@ -156,6 +157,7 @@ export async function queueInterview(interview: PendingInterview) {
   const transaction = database.transaction(PENDING_STORE, "readwrite")
   transaction.objectStore(PENDING_STORE).put(interview)
   await transactionComplete(transaction)
+  pendingInterviewsChanged.dispatchEvent(new Event("change"))
 }
 
 export async function getPendingInterviews() {
@@ -173,6 +175,12 @@ export async function removePendingInterview(clientSubmissionId: string) {
   const transaction = database.transaction(PENDING_STORE, "readwrite")
   transaction.objectStore(PENDING_STORE).delete(clientSubmissionId)
   await transactionComplete(transaction)
+  pendingInterviewsChanged.dispatchEvent(new Event("change"))
+}
+
+export function subscribeToPendingInterviews(listener: () => void) {
+  pendingInterviewsChanged.addEventListener("change", listener)
+  return () => pendingInterviewsChanged.removeEventListener("change", listener)
 }
 
 export async function markPendingInterviewAttempt(
