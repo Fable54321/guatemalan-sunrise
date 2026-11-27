@@ -573,7 +573,7 @@ export default function InterviewForm() {
             <span className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full bg-amber-500" />
             <p>
               {!isOnline || usingCachedQuestions
-                ? "Mode hors ligne : le formulaire est sauvegardé sur cet appareil."
+                ? "Mode hors ligne : le formulaire sera sauvegardé sur cet appareil."
                 : `${pendingCount} entrevue${pendingCount > 1 ? "s" : ""} en attente de synchronisation.`}
             </p>
           </div>
