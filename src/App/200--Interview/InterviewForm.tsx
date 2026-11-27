@@ -7,6 +7,16 @@ import {
   type AnswerValue,
   type InterviewQuestion,
 } from "../../api/candidateInterviews"
+import {
+  cacheInterviewQuestions,
+  clearInterviewDraft,
+  getCachedInterviewQuestions,
+  getInterviewDraft,
+  getPendingInterviews,
+  queueInterview,
+  saveInterviewDraft,
+} from "../../offline/interviewDb"
+import { syncPendingInterviews } from "../../offline/syncPendingInterviews"
 
 const sectionOrder = [
   "group_meeting",
@@ -28,6 +38,9 @@ const sectionLabels: Record<string, { title: string; eyebrow: string }> = {
 
 const isEmpty = (value: AnswerValue | undefined) =>
   value === undefined || (typeof value === "string" && value.trim() === "")
+
+const isValidPhone = (phone: string) =>
+  phone.trim().length <= 30 && (phone.match(/\d/g)?.length ?? 0) >= 7
 
 function ratingBounds(question: InterviewQuestion) {
   const options = question.options
@@ -168,29 +181,105 @@ function QuestionField({
   )
 }
 
+function CandidateInput({
+  id,
+  label,
+  value,
+  error,
+  onChange,
+  required = false,
+  type = "text",
+  autoComplete,
+  placeholder,
+  maxLength,
+  autoFocus = false,
+}: {
+  id: string
+  label: string
+  value: string
+  error?: string
+  onChange: (value: string) => void
+  required?: boolean
+  type?: "text" | "tel"
+  autoComplete?: string
+  placeholder?: string
+  maxLength: number
+  autoFocus?: boolean
+}) {
+  return (
+    <div>
+      <label htmlFor={id} className="mb-2 block text-sm font-extrabold text-[#35482e]">
+        {label} {required && <span className="text-[#d95726]">*</span>}
+      </label>
+      <input
+        id={id}
+        type={type}
+        autoFocus={autoFocus}
+        autoComplete={autoComplete}
+        inputMode={type === "tel" ? "tel" : undefined}
+        maxLength={maxLength}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        aria-invalid={Boolean(error)}
+        aria-describedby={error ? `${id}-error` : undefined}
+        className={`w-full rounded-xl border bg-[#fbfcfa] px-4 py-3.5 text-base text-[#24351e] outline-none transition placeholder:text-[#a3aca0] focus:ring-4 focus:ring-[#668f20]/10 ${
+          error ? "border-red-300 focus:border-red-400" : "border-[#d9e3d2] focus:border-[#668f20]"
+        }`}
+      />
+      {error && (
+        <p id={`${id}-error`} className="mt-2 text-sm font-semibold text-red-700">
+          {error}
+        </p>
+      )}
+    </div>
+  )
+}
+
 export default function InterviewForm() {
   const [questions, setQuestions] = useState<InterviewQuestion[]>([])
   const [answers, setAnswers] = useState<Record<number, AnswerValue>>({})
   const [candidateNumber, setCandidateNumber] = useState("")
+  const [firstName, setFirstName] = useState("")
+  const [lastName, setLastName] = useState("")
+  const [phoneNumber1, setPhoneNumber1] = useState("")
+  const [phoneNumber2, setPhoneNumber2] = useState("")
   const [step, setStep] = useState(0)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [pageError, setPageError] = useState("")
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
-  const [completedInterviewId, setCompletedInterviewId] = useState<number | null>(null)
+  const [completionStatus, setCompletionStatus] = useState<"saved" | "queued" | null>(null)
+  const [draftReady, setDraftReady] = useState(false)
+  const [isOnline, setIsOnline] = useState(() => navigator.onLine)
+  const [usingCachedQuestions, setUsingCachedQuestions] = useState(false)
+  const [pendingCount, setPendingCount] = useState(0)
 
   useEffect(() => {
     const controller = new AbortController()
     let active = true
 
-    getInterviewQuestions(controller.signal)
-      .then(({ questions: loadedQuestions }) => {
+    const loadQuestions = async () => {
+      try {
+        const { questions: loadedQuestions } = await getInterviewQuestions(controller.signal)
         if (!active) return
         setQuestions(loadedQuestions)
+        setUsingCachedQuestions(false)
         setPageError("")
-      })
-      .catch((error: unknown) => {
+        void cacheInterviewQuestions(loadedQuestions).catch(() => undefined)
+      } catch (error) {
         if (!active || (error instanceof DOMException && error.name === "AbortError")) return
+
+        const cachedQuestions = await getCachedInterviewQuestions().catch(() => null)
+        if (!active) return
+
+        if (cachedQuestions?.length) {
+          setQuestions(cachedQuestions)
+          setUsingCachedQuestions(true)
+          setPageError("")
+          return
+        }
+
         setPageError(
           error instanceof ApiError && error.status === 401
             ? "Votre session a expiré. Veuillez vous reconnecter au portail."
@@ -198,14 +287,101 @@ export default function InterviewForm() {
               ? error.message
               : "Impossible de charger le formulaire.",
         )
-      })
-      .finally(() => {
+      } finally {
         if (active) setLoading(false)
-      })
+      }
+    }
+
+    void loadQuestions()
 
     return () => {
       active = false
       controller.abort()
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+
+    getInterviewDraft()
+      .then((draft) => {
+        if (!active || !draft) return
+        setCandidateNumber(draft.candidate.candidateNumber)
+        setFirstName(draft.candidate.firstName)
+        setLastName(draft.candidate.lastName)
+        setPhoneNumber1(draft.candidate.phoneNumber1)
+        setPhoneNumber2(draft.candidate.phoneNumber2)
+        setAnswers(draft.answers)
+        setStep(Math.max(0, draft.step))
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (active) setDraftReady(true)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!draftReady || completionStatus) return
+
+    const saveTimer = window.setTimeout(() => {
+      void saveInterviewDraft({
+        candidate: {
+          candidateNumber,
+          firstName,
+          lastName,
+          phoneNumber1,
+          phoneNumber2,
+        },
+        answers,
+        step,
+      }).catch(() => undefined)
+    }, 400)
+
+    return () => window.clearTimeout(saveTimer)
+  }, [
+    answers,
+    candidateNumber,
+    completionStatus,
+    draftReady,
+    firstName,
+    lastName,
+    phoneNumber1,
+    phoneNumber2,
+    step,
+  ])
+
+  useEffect(() => {
+    let active = true
+
+    const refreshPendingCount = async () => {
+      const pending = await getPendingInterviews().catch(() => [])
+      if (active) setPendingCount(pending.length)
+    }
+
+    const sync = async () => {
+      if (!navigator.onLine) return
+      await syncPendingInterviews().catch(() => undefined)
+      await refreshPendingCount()
+    }
+
+    const handleOnline = () => {
+      setIsOnline(true)
+      void sync()
+    }
+    const handleOffline = () => setIsOnline(false)
+
+    window.addEventListener("online", handleOnline)
+    window.addEventListener("offline", handleOffline)
+    void refreshPendingCount().then(sync)
+
+    return () => {
+      active = false
+      window.removeEventListener("online", handleOnline)
+      window.removeEventListener("offline", handleOffline)
     }
   }, [])
 
@@ -226,8 +402,24 @@ export default function InterviewForm() {
   const validateCurrentStep = () => {
     const errors: Record<string, string> = {}
 
-    if (step === 0 && !candidateNumber.trim()) {
-      errors.candidate_number = "Entrez le numéro du candidat."
+    if (step === 0) {
+      if (!candidateNumber.trim()) {
+        errors.candidate_number = "Entrez le numéro du candidat."
+      }
+      if (!firstName.trim()) {
+        errors.first_name = "Entrez le prénom du candidat."
+      }
+      if (!lastName.trim()) {
+        errors.last_name = "Entrez le nom de famille du candidat."
+      }
+      if (!phoneNumber1.trim()) {
+        errors.phone_number_1 = "Entrez le numéro de téléphone principal."
+      } else if (!isValidPhone(phoneNumber1)) {
+        errors.phone_number_1 = "Entrez un numéro de téléphone valide."
+      }
+      if (phoneNumber2.trim() && !isValidPhone(phoneNumber2)) {
+        errors.phone_number_2 = "Entrez un numéro de téléphone valide."
+      }
     }
 
     currentQuestions.forEach((question) => {
@@ -251,16 +443,47 @@ export default function InterviewForm() {
     setPageError("")
     if (!validateCurrentStep()) return
 
+    const candidate = {
+      candidateNumber: candidateNumber.trim(),
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      phoneNumber1: phoneNumber1.trim(),
+      phoneNumber2: phoneNumber2.trim(),
+    }
+    const clientSubmissionId = crypto.randomUUID()
+    const saveForLater = async () => {
+      await queueInterview({
+        clientSubmissionId,
+        candidate,
+        answers,
+        createdAt: new Date().toISOString(),
+        attempts: 0,
+      })
+      await clearInterviewDraft()
+      setPendingCount((current) => current + 1)
+      setCompletionStatus("queued")
+    }
+
     setSubmitting(true)
     try {
-      const result = await createInterview(candidateNumber.trim(), answers)
-      setCompletedInterviewId(result.interview.id)
+      if (!navigator.onLine) {
+        await saveForLater()
+        return
+      }
+
+      await createInterview(candidate, answers, clientSubmissionId)
+      await clearInterviewDraft()
+      setCompletionStatus("saved")
     } catch (error) {
       if (error instanceof ApiError) {
         setFieldErrors((current) => ({ ...current, ...error.fieldErrors }))
         setPageError(error.message)
       } else {
-        setPageError("Impossible d'enregistrer l'entrevue. Réessayez.")
+        try {
+          await saveForLater()
+        } catch {
+          setPageError("Impossible d'enregistrer l'entrevue hors ligne. Réessayez.")
+        }
       }
     } finally {
       setSubmitting(false)
@@ -282,7 +505,20 @@ export default function InterviewForm() {
     })
   }
 
-  if (completedInterviewId !== null) {
+  const updateCandidateField = (
+    field: string,
+    value: string,
+    setter: (value: string) => void,
+  ) => {
+    setter(value)
+    setFieldErrors((current) => {
+      const next = { ...current }
+      delete next[field]
+      return next
+    })
+  }
+
+  if (completionStatus !== null) {
     return (
       <main className="grid min-h-screen place-items-center bg-[#f3f6ef] px-5 py-12">
         <section className="w-full max-w-xl rounded-4xl border border-[#dce7d3] bg-white p-8 text-center shadow-[0_24px_70px_rgba(43,70,28,0.10)] sm:p-12">
@@ -291,10 +527,18 @@ export default function InterviewForm() {
               <path d="m5 12 4 4L19 6" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </div>
-          <p className="mb-2 text-xs font-extrabold uppercase tracking-[0.18em] text-[#668f20]">Entrevue enregistrée</p>
-          <h1 className="text-3xl font-black tracking-[-0.03em] text-[#24351e]">Merci, c’est terminé.</h1>
+          <p className="mb-2 text-xs font-extrabold uppercase tracking-[0.18em] text-[#668f20]">
+            {completionStatus === "saved" ? "Entrevue enregistrée" : "Entrevue sauvegardée hors ligne"}
+          </p>
+          <h1 className="text-3xl font-black tracking-[-0.03em] text-[#24351e]">
+            {completionStatus === "saved" ? "Merci, c’est terminé." : "Le formulaire est en sécurité."}
+          </h1>
           <p className="mx-auto mt-4 max-w-sm leading-7 text-[#687565]">
-            Les réponses du candidat <strong className="text-[#35482e]">{candidateNumber}</strong> ont bien été sauvegardées.
+            {completionStatus === "saved" ? (
+              <>Les réponses de <strong className="text-[#35482e]">{firstName} {lastName}</strong> ({candidateNumber}) ont bien été sauvegardées.</>
+            ) : (
+              <>Les réponses de <strong className="text-[#35482e]">{firstName} {lastName}</strong> seront envoyées automatiquement dès que la connexion reviendra.</>
+            )}
           </p>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:justify-center">
             <button
@@ -302,9 +546,13 @@ export default function InterviewForm() {
               onClick={() => {
                 setAnswers({})
                 setCandidateNumber("")
+                setFirstName("")
+                setLastName("")
+                setPhoneNumber1("")
+                setPhoneNumber2("")
                 setStep(0)
                 setFieldErrors({})
-                setCompletedInterviewId(null)
+                setCompletionStatus(null)
               }}
               className="rounded-xl bg-[#4f7818] px-6 py-3 text-sm font-extrabold text-white transition hover:bg-[#416414]"
             >
@@ -324,6 +572,16 @@ export default function InterviewForm() {
    
 
       <div className="mx-auto max-w-3xl px-5 py-8 sm:px-8 sm:py-12">
+        {(!isOnline || usingCachedQuestions || pendingCount > 0) && (
+          <div className="mb-5 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="status">
+            <span className="mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full bg-amber-500" />
+            <p>
+              {!isOnline || usingCachedQuestions
+                ? "Mode hors ligne : le formulaire est sauvegardé sur cet appareil."
+                : `${pendingCount} entrevue${pendingCount > 1 ? "s" : ""} en attente de synchronisation.`}
+            </p>
+          </div>
+        )}
         <div className="mb-8">
           <div className="mb-3 flex items-center justify-between text-xs font-bold text-[#687565]">
             <span>Étape {step + 1} sur {totalSteps}</span>
@@ -360,36 +618,75 @@ export default function InterviewForm() {
             </section>
 
             {step === 0 ? (
-              <section className={`rounded-2xl border bg-white p-6 shadow-[0_18px_50px_rgba(43,70,28,0.06)] sm:p-8 ${fieldErrors.candidate_number ? "border-red-300" : "border-[#dfe8d8]"}`}>
-                <label htmlFor="candidate-number" className="mb-2 block text-sm font-extrabold text-[#35482e]">
-                  Numéro du candidat <span className="text-[#d95726]">*</span>
-                </label>
-                <p className="mb-4 text-sm text-[#758271]">Utilisez le numéro qui apparaît sur la fiche ou la photo du candidat.</p>
-                <div className="relative">
-                  <span className="pointer-events-none absolute inset-y-0 left-4 flex items-center text-[#7a8c72]">
-                    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M7 4h10M7 20h10M10 2 8 22M16 2l-2 20M4 9h16M3 15h16" strokeLinecap="round" />
-                    </svg>
-                  </span>
-                  <input
-                    id="candidate-number"
-                    autoFocus
-                    autoComplete="off"
+              <section className="rounded-2xl border border-[#dfe8d8] bg-white p-6 shadow-[0_18px_50px_rgba(43,70,28,0.06)] sm:p-8">
+                <div className="mb-6 border-b border-[#e6ece1] pb-5">
+                  <h2 className="text-lg font-black text-[#2d4225]">Informations du candidat</h2>
+                  <p className="mt-1 text-sm leading-6 text-[#758271]">
+                    Saisissez les coordonnées qui permettent d’identifier et de joindre le candidat.
+                  </p>
+                </div>
+
+                <div className="grid gap-5 sm:grid-cols-2">
+                  <div className="sm:col-span-2">
+                    <CandidateInput
+                      id="candidate-number"
+                      label="Numéro du candidat"
+                      value={candidateNumber}
+                      error={fieldErrors.candidate_number}
+                      onChange={(value) => updateCandidateField("candidate_number", value, setCandidateNumber)}
+                      required
+                      autoComplete="off"
+                      placeholder="Ex. GT-024"
+                      maxLength={20}
+                      autoFocus
+                    />
+                  </div>
+                  <CandidateInput
+                    id="candidate-first-name"
+                    label="Prénom"
+                    value={firstName}
+                    error={fieldErrors.first_name}
+                    onChange={(value) => updateCandidateField("first_name", value, setFirstName)}
+                    required
+                    autoComplete="given-name"
+                    placeholder="Prénom du candidat"
                     maxLength={100}
-                    value={candidateNumber}
-                    onChange={(event) => {
-                      setCandidateNumber(event.target.value)
-                      setFieldErrors((current) => {
-                        const next = { ...current }
-                        delete next.candidate_number
-                        return next
-                      })
-                    }}
-                    placeholder="Ex. GT-024"
-                    className="w-full rounded-xl border border-[#d9e3d2] bg-[#fbfcfa] py-4 pl-12 pr-4 text-lg font-bold tracking-wide text-[#24351e] uppercase outline-none transition placeholder:font-medium placeholder:normal-case placeholder:tracking-normal placeholder:text-[#a3aca0] focus:border-[#668f20] focus:ring-4 focus:ring-[#668f20]/10"
+                  />
+                  <CandidateInput
+                    id="candidate-last-name"
+                    label="Nom de famille"
+                    value={lastName}
+                    error={fieldErrors.last_name}
+                    onChange={(value) => updateCandidateField("last_name", value, setLastName)}
+                    required
+                    autoComplete="family-name"
+                    placeholder="Nom du candidat"
+                    maxLength={100}
+                  />
+                  <CandidateInput
+                    id="candidate-phone-1"
+                    label="Téléphone 1"
+                    value={phoneNumber1}
+                    error={fieldErrors.phone_number_1}
+                    onChange={(value) => updateCandidateField("phone_number_1", value, setPhoneNumber1)}
+                    required
+                    type="tel"
+                    autoComplete="tel"
+                    placeholder="Ex. +502 5555 1234"
+                    maxLength={30}
+                  />
+                  <CandidateInput
+                    id="candidate-phone-2"
+                    label="Téléphone 2 (facultatif)"
+                    value={phoneNumber2}
+                    error={fieldErrors.phone_number_2}
+                    onChange={(value) => updateCandidateField("phone_number_2", value, setPhoneNumber2)}
+                    type="tel"
+                    autoComplete="tel"
+                    placeholder="Deuxième numéro"
+                    maxLength={30}
                   />
                 </div>
-                {fieldErrors.candidate_number && <p className="mt-3 text-sm font-semibold text-red-700">{fieldErrors.candidate_number}</p>}
               </section>
             ) : (
               <div className="space-y-2">

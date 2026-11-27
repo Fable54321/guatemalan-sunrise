@@ -12,6 +12,14 @@ export type InterviewQuestion = {
 
 export type AnswerValue = boolean | number | string
 
+export type CandidateDetails = {
+  candidateNumber: string
+  firstName: string
+  lastName: string
+  phoneNumber1: string
+  phoneNumber2: string
+}
+
 type ApiErrorPayload = {
   error?: string
   message?: string
@@ -56,15 +64,21 @@ export async function getInterviewQuestions(signal?: AbortSignal) {
 }
 
 export async function createInterview(
-  candidateNumber: string,
+  candidate: CandidateDetails,
   answers: Record<number, AnswerValue>,
+  clientSubmissionId: string,
 ) {
   const response = await fetch(`${apiBaseUrl}/candidate-interviews`, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      candidate_number: candidateNumber,
+      candidate_number: candidate.candidateNumber,
+      first_name: candidate.firstName,
+      last_name: candidate.lastName,
+      phone_number_1: candidate.phoneNumber1,
+      phone_number_2: candidate.phoneNumber2,
+      client_submission_id: clientSubmissionId,
       answers: Object.entries(answers).map(([questionId, value]) => ({
         question_id: Number(questionId),
         value,
@@ -72,5 +86,15 @@ export async function createInterview(
     }),
   })
 
-  return parseResponse<{ interview: { id: number; candidate_number: string } }>(response)
+  return parseResponse<{
+    interview: {
+      id: number
+      candidate_number: string
+      first_name: string
+      last_name: string
+      phone_number_1: string
+      phone_number_2: string | null
+      client_submission_id: string
+    }
+  }>(response)
 }
