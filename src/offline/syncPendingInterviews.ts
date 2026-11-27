@@ -22,6 +22,12 @@ async function runSync(): Promise<SyncResult> {
   let synced = 0
 
   for (const interview of pending) {
+    // Remove records created by the temporary local-test mode instead of uploading them.
+    if (interview.testOnly) {
+      await removePendingInterview(interview.clientSubmissionId)
+      continue
+    }
+
     try {
       await createInterview(
         interview.candidate,

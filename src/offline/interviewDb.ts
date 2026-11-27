@@ -34,6 +34,7 @@ export type PendingInterview = {
   createdAt: string
   attempts: number
   lastError?: string
+  testOnly?: boolean
 }
 
 let databasePromise: Promise<IDBDatabase> | null = null
