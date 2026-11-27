@@ -612,7 +612,7 @@ export default function InterviewForm() {
             <section className="mb-7">
              
               <h1 className="text-3xl font-black tracking-[-0.035em] text-[#24351e] sm:text-4xl">
-                {step === 0 ? "Identifier le candidat" : sectionLabels[currentSection || ""]?.title || currentSection}
+                {step === 0 ? "Informations du candidat" : sectionLabels[currentSection || ""]?.title || currentSection}
               </h1>
          
             </section>
