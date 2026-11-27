@@ -3,12 +3,10 @@ import { Link } from "react-router-dom"
 import {
   ApiError,
   createInterview,
-  getInterviewQuestions,
   type AnswerValue,
   type InterviewQuestion,
 } from "../../api/candidateInterviews"
 import {
-  cacheInterviewQuestions,
   clearInterviewDraft,
   getCachedInterviewQuestions,
   getInterviewDraft,
@@ -16,6 +14,7 @@ import {
   queueInterview,
   saveInterviewDraft,
 } from "../../offline/interviewDb"
+import { refreshInterviewQuestionsCache } from "../../offline/interviewQuestionsCache"
 import { syncPendingInterviews } from "../../offline/syncPendingInterviews"
 
 const sectionOrder = [
@@ -256,19 +255,17 @@ export default function InterviewForm() {
   const [pendingCount, setPendingCount] = useState(0)
 
   useEffect(() => {
-    const controller = new AbortController()
     let active = true
 
     const loadQuestions = async () => {
       try {
-        const { questions: loadedQuestions } = await getInterviewQuestions(controller.signal)
+        const loadedQuestions = await refreshInterviewQuestionsCache()
         if (!active) return
         setQuestions(loadedQuestions)
         setUsingCachedQuestions(false)
         setPageError("")
-        void cacheInterviewQuestions(loadedQuestions).catch(() => undefined)
       } catch (error) {
-        if (!active || (error instanceof DOMException && error.name === "AbortError")) return
+        if (!active) return
 
         const cachedQuestions = await getCachedInterviewQuestions().catch(() => null)
         if (!active) return
@@ -296,7 +293,6 @@ export default function InterviewForm() {
 
     return () => {
       active = false
-      controller.abort()
     }
   }, [])
 
