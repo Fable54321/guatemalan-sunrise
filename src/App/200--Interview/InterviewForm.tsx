@@ -356,11 +356,7 @@ export default function InterviewForm() {
               <h1 className="text-3xl font-black tracking-[-0.035em] text-[#24351e] sm:text-4xl">
                 {step === 0 ? "Identifier le candidat" : sectionLabels[currentSection || ""]?.title || currentSection}
               </h1>
-              <p className="mt-3 max-w-2xl text-sm leading-6 text-[#687565] sm:text-base">
-                {step === 0
-                  ? "Commencez par inscrire le numéro attribué au candidat. Vous pourrez ensuite compléter l’entrevue section par section."
-                  : "Répondez selon vos observations. Les champs marqués d’un astérisque sont obligatoires."}
-              </p>
+         
             </section>
 
             {step === 0 ? (
