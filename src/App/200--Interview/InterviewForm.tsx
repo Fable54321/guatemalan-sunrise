@@ -48,7 +48,8 @@ const mentionsOtherJob = (question: InterviewQuestion) => {
   const text = normalizeQuestionText(question.question_text)
   const describesAdditionalJob = ["autre", "ailleurs", "second", "deuxieme"]
     .some((term) => text.includes(term))
-  return describesAdditionalJob && ["emploi", "travail", "job"].some((term) => text.includes(term))
+  return describesAdditionalJob && ["emploi", "travail", "metier", "job"]
+    .some((term) => text.includes(term))
 }
 
 const isConditionalDetailPrompt = (question: InterviewQuestion) => {
