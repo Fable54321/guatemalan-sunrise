@@ -636,7 +636,7 @@ export default function InterviewForm() {
                       onChange={(value) => updateCandidateField("candidate_number", value, setCandidateNumber)}
                       required
                       autoComplete="off"
-                      placeholder="Ex. GT-024"
+                      placeholder="Ex. 150"
                       maxLength={20}
                       autoFocus
                     />
