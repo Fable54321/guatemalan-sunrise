@@ -4,11 +4,14 @@ import {
   ApiError,
   createInterview,
   type AnswerValue,
+  type InterviewSection,
   type InterviewQuestion,
+  type PracticalTask,
+  type PracticalTaskAnswers,
 } from "../../api/candidateInterviews"
 import {
   clearInterviewDraft,
-  getCachedInterviewQuestions,
+  getCachedInterviewFormDefinition,
   getInterviewDraft,
   getPendingInterviews,
   queueInterview,
@@ -16,15 +19,6 @@ import {
 } from "../../offline/interviewDb"
 import { refreshInterviewQuestionsCache } from "../../offline/interviewQuestionsCache"
 import { syncPendingInterviews } from "../../offline/syncPendingInterviews"
-
-const sectionOrder = [
-  "group_meeting",
-  "general_information",
-  "presentation",
-  "practical_exercises",
-  "motivation",
-  "final_comments",
-]
 
 const sectionLabels: Record<string, { title: string; eyebrow: string }> = {
   group_meeting: { title: "Rencontre de groupe", eyebrow: "" },
@@ -66,7 +60,7 @@ function findOtherJobDependency(questions: InterviewQuestion[]) {
   const followingTextQuestions = questions
     .filter(
       (question) =>
-        question.section === trigger.section &&
+        question.section_id === trigger.section_id &&
         question.answer_type === "text" &&
         question.display_order > trigger.display_order,
     )
@@ -203,7 +197,7 @@ function QuestionField({
       {question.answer_type === "text" && (
         <textarea
           id={inputId}
-          rows={question.section === "final_comments" ? 6 : 3}
+          rows={question.section_code === "final_comments" ? 6 : 3}
           maxLength={5000}
           value={typeof value === "string" ? value : ""}
           onChange={(event) => onChange(event.target.value)}
@@ -214,6 +208,59 @@ function QuestionField({
 
       {error && (
         <p id={errorId} className="mt-3 text-sm font-semibold text-red-700" role="alert">{error}</p>
+      )}
+    </fieldset>
+  )
+}
+
+function PracticalTaskField({
+  task,
+  value,
+  error,
+  onChange,
+}: {
+  task: PracticalTask
+  value?: number
+  error?: string
+  onChange: (value: number) => void
+}) {
+  const errorId = `practical-task-${task.id}-error`
+
+  return (
+    <fieldset
+      className={`rounded-2xl border bg-white p-5 transition-colors sm:p-6 ${
+        error ? "border-red-300" : "border-[#dfe8d8] focus-within:border-[#668f20]"
+      }`}
+      aria-describedby={error ? errorId : undefined}
+    >
+      <legend className="mb-4 text-base font-semibold leading-6 text-[#24351e]">
+        {task.description}
+      </legend>
+      <div className="flex flex-wrap gap-2 sm:gap-3">
+        {[1, 2, 3, 4, 5].map((rating) => (
+          <button
+            key={rating}
+            type="button"
+            onClick={() => onChange(rating)}
+            aria-label={`Note de ${rating} pour ${task.description}`}
+            aria-pressed={value === rating}
+            className={`grid h-12 w-12 place-items-center rounded-xl border text-sm font-extrabold transition-all ${
+              value === rating
+                ? "border-[#4f7818] bg-[#5e861b] text-white shadow-[0_6px_18px_rgba(69,105,19,0.22)]"
+                : "border-[#d9e3d2] bg-white text-[#53634e] hover:border-[#91ad66] hover:bg-[#f8fbf5]"
+            }`}
+          >
+            {rating}
+          </button>
+        ))}
+        <span className="self-center pl-1 text-xs font-medium text-[#758271]">
+          1 = faible · 5 = excellent
+        </span>
+      </div>
+      {error && (
+        <p id={errorId} className="mt-3 text-sm font-semibold text-red-700" role="alert">
+          {error}
+        </p>
       )}
     </fieldset>
   )
@@ -275,8 +322,11 @@ function CandidateInput({
 }
 
 export default function InterviewForm() {
+  const [configuredSections, setConfiguredSections] = useState<InterviewSection[]>([])
   const [questions, setQuestions] = useState<InterviewQuestion[]>([])
+  const [practicalTasks, setPracticalTasks] = useState<PracticalTask[]>([])
   const [answers, setAnswers] = useState<Record<number, AnswerValue>>({})
+  const [practicalTaskAnswers, setPracticalTaskAnswers] = useState<PracticalTaskAnswers>({})
   const [candidateNumber, setCandidateNumber] = useState("")
   const [firstName, setFirstName] = useState("")
   const [lastName, setLastName] = useState("")
@@ -298,19 +348,23 @@ export default function InterviewForm() {
 
     const loadQuestions = async () => {
       try {
-        const loadedQuestions = await refreshInterviewQuestionsCache()
+        const definition = await refreshInterviewQuestionsCache()
         if (!active) return
-        setQuestions(loadedQuestions)
+        setConfiguredSections(definition.sections)
+        setQuestions(definition.questions)
+        setPracticalTasks(definition.practical_tasks)
         setUsingCachedQuestions(false)
         setPageError("")
       } catch (error) {
         if (!active) return
 
-        const cachedQuestions = await getCachedInterviewQuestions().catch(() => null)
+        const cachedDefinition = await getCachedInterviewFormDefinition().catch(() => null)
         if (!active) return
 
-        if (cachedQuestions?.length) {
-          setQuestions(cachedQuestions)
+        if (cachedDefinition?.sections.length) {
+          setConfiguredSections(cachedDefinition.sections)
+          setQuestions(cachedDefinition.questions)
+          setPracticalTasks(cachedDefinition.practical_tasks)
           setUsingCachedQuestions(true)
           setPageError("")
           return
@@ -347,6 +401,7 @@ export default function InterviewForm() {
         setPhoneNumber1(draft.candidate.phoneNumber1)
         setPhoneNumber2(draft.candidate.phoneNumber2)
         setAnswers(draft.answers)
+        setPracticalTaskAnswers(draft.practicalTaskAnswers ?? {})
         setStep(Math.max(0, draft.step))
       })
       .catch(() => undefined)
@@ -372,6 +427,7 @@ export default function InterviewForm() {
           phoneNumber2,
         },
         answers,
+        practicalTaskAnswers,
         step,
       }).catch(() => undefined)
     }, 400)
@@ -386,6 +442,7 @@ export default function InterviewForm() {
     lastName,
     phoneNumber1,
     phoneNumber2,
+    practicalTaskAnswers,
     step,
   ])
 
@@ -421,15 +478,21 @@ export default function InterviewForm() {
   }, [])
 
   const sections = useMemo(() => {
-    const availableSections = new Set(questions.map((question) => question.section))
-    const orderedSections = sectionOrder.filter((section) => availableSections.has(section))
-    const extraSections = [...availableSections].filter((section) => !sectionOrder.includes(section))
-    return [...orderedSections, ...extraSections]
-  }, [questions])
+    const sectionIdsWithFields = new Set([
+      ...questions.map((question) => question.section_id),
+      ...practicalTasks.map((task) => task.section_id),
+    ])
+    return configuredSections
+      .filter((section) => sectionIdsWithFields.has(section.id))
+      .sort((left, right) => left.display_order - right.display_order || left.id - right.id)
+  }, [configuredSections, practicalTasks, questions])
 
   const currentSection = step > 0 ? sections[step - 1] : null
   const currentQuestions = currentSection
-    ? questions.filter((question) => question.section === currentSection)
+    ? questions.filter((question) => question.section_id === currentSection.id)
+    : []
+  const currentPracticalTasks = currentSection
+    ? practicalTasks.filter((task) => task.section_id === currentSection.id)
     : []
   const otherJobDependency = useMemo(() => findOtherJobDependency(questions), [questions])
   const otherJobSelected = otherJobDependency
@@ -438,6 +501,18 @@ export default function InterviewForm() {
   const visibleCurrentQuestions = currentQuestions.filter(
     (question) => question.id !== otherJobDependency?.detailId || otherJobSelected,
   )
+  const currentFields: Array<
+    | { kind: "question"; field: InterviewQuestion }
+    | { kind: "practicalTask"; field: PracticalTask }
+  > = [
+    ...visibleCurrentQuestions.map((field) => ({ kind: "question" as const, field })),
+    ...currentPracticalTasks.map((field) => ({ kind: "practicalTask" as const, field })),
+  ].sort((left, right) => {
+    const orderDifference = left.field.display_order - right.field.display_order
+    if (orderDifference !== 0) return orderDifference
+    if (left.kind !== right.kind) return left.kind === "practicalTask" ? -1 : 1
+    return String(left.field.id).localeCompare(String(right.field.id))
+  })
   const totalSteps = sections.length + 1
  
 
@@ -469,6 +544,13 @@ export default function InterviewForm() {
         || (question.id === otherJobDependency?.detailId && otherJobSelected)
       if (isRequired && isEmpty(answers[question.id])) {
         errors[String(question.id)] = "Cette réponse est requise."
+      }
+    })
+
+    currentPracticalTasks.forEach((task) => {
+      const value = practicalTaskAnswers[task.id]
+      if (value !== undefined && (!Number.isInteger(value) || value < 1 || value > 5)) {
+        errors[task.id] = "La note doit être comprise entre 1 et 5."
       }
     })
 
@@ -504,6 +586,7 @@ export default function InterviewForm() {
         clientSubmissionId,
         candidate,
         answers: submittedAnswers,
+        practicalTaskAnswers,
         createdAt: new Date().toISOString(),
         attempts: 0,
       })
@@ -519,7 +602,12 @@ export default function InterviewForm() {
         return
       }
 
-      await createInterview(candidate, submittedAnswers, clientSubmissionId)
+      await createInterview(
+        candidate,
+        submittedAnswers,
+        practicalTaskAnswers,
+        clientSubmissionId,
+      )
       await clearInterviewDraft()
       setCompletionStatus("saved")
     } catch (error) {
@@ -555,6 +643,15 @@ export default function InterviewForm() {
       if (questionId === otherJobDependency?.triggerId && value !== true) {
         delete next[String(otherJobDependency.detailId)]
       }
+      return next
+    })
+  }
+
+  const updatePracticalTaskAnswer = (practicalTaskId: string, value: number) => {
+    setPracticalTaskAnswers((current) => ({ ...current, [practicalTaskId]: value }))
+    setFieldErrors((current) => {
+      const next = { ...current }
+      delete next[practicalTaskId]
       return next
     })
   }
@@ -599,6 +696,7 @@ export default function InterviewForm() {
               type="button"
               onClick={() => {
                 setAnswers({})
+                setPracticalTaskAnswers({})
                 setCandidateNumber("")
                 setFirstName("")
                 setLastName("")
@@ -649,7 +747,7 @@ export default function InterviewForm() {
             <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-4 border-[#dce7d3] border-t-[#5d861b]" />
             <p className="font-semibold text-[#687565]">Chargement du formulaire…</p>
           </div>
-        ) : questions.length === 0 ? (
+        ) : questions.length === 0 && practicalTasks.length === 0 ? (
           <div className="rounded-3xl border border-red-200 bg-white p-8 text-center shadow-sm">
             <h1 className="text-xl font-black text-[#24351e]">Le formulaire n’est pas disponible</h1>
             <p className="mt-3 text-sm leading-6 text-red-700">{pageError || "Aucune question active n'a été trouvée."}</p>
@@ -666,7 +764,9 @@ export default function InterviewForm() {
             <section className="mb-7">
              
               <h1 className="text-3xl font-black tracking-[-0.035em] text-[#24351e] sm:text-4xl">
-                {step === 0 ? "Informations du candidat" : sectionLabels[currentSection || ""]?.title || currentSection}
+                {step === 0
+                  ? "Informations du candidat"
+                  : sectionLabels[currentSection?.code || ""]?.title || currentSection?.name}
               </h1>
          
             </section>
@@ -739,16 +839,24 @@ export default function InterviewForm() {
               </section>
             ) : (
               <div className="space-y-2">
-                {visibleCurrentQuestions.map((question) => (
+                {currentFields.map((item) => item.kind === "question" ? (
                   <QuestionField
-                    key={question.id}
-                    question={question}
-                    value={answers[question.id]}
-                    error={fieldErrors[String(question.id)]}
-                    required={question.is_required || (
-                      question.id === otherJobDependency?.detailId && otherJobSelected
+                    key={`question-${item.field.id}`}
+                    question={item.field}
+                    value={answers[item.field.id]}
+                    error={fieldErrors[String(item.field.id)]}
+                    required={item.field.is_required || (
+                      item.field.id === otherJobDependency?.detailId && otherJobSelected
                     )}
-                    onChange={(value) => updateAnswer(question.id, value)}
+                    onChange={(value) => updateAnswer(item.field.id, value)}
+                  />
+                ) : (
+                  <PracticalTaskField
+                    key={`practical-task-${item.field.id}`}
+                    task={item.field}
+                    value={practicalTaskAnswers[item.field.id]}
+                    error={fieldErrors[item.field.id]}
+                    onChange={(value) => updatePracticalTaskAnswer(item.field.id, value)}
                   />
                 ))}
               </div>

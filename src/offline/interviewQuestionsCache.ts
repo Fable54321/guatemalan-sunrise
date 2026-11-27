@@ -1,18 +1,18 @@
 import {
   getInterviewQuestions,
-  type InterviewQuestion,
+  type InterviewFormDefinition,
 } from "../api/candidateInterviews"
-import { cacheInterviewQuestions } from "./interviewDb"
+import { cacheInterviewFormDefinition } from "./interviewDb"
 
-let activeRefresh: Promise<InterviewQuestion[]> | null = null
+let activeRefresh: Promise<InterviewFormDefinition> | null = null
 
 export function refreshInterviewQuestionsCache() {
   if (activeRefresh) return activeRefresh
 
   activeRefresh = getInterviewQuestions()
-    .then(async ({ questions }) => {
-      await cacheInterviewQuestions(questions).catch(() => undefined)
-      return questions
+    .then(async (definition) => {
+      await cacheInterviewFormDefinition(definition).catch(() => undefined)
+      return definition
     })
     .finally(() => {
       activeRefresh = null

@@ -1,7 +1,8 @@
 import type {
   AnswerValue,
   CandidateDetails,
-  InterviewQuestion,
+  InterviewFormDefinition,
+  PracticalTaskAnswers,
 } from "../api/candidateInterviews"
 
 const DATABASE_NAME = "vegibec-candidate-interviews"
@@ -9,7 +10,7 @@ const DATABASE_VERSION = 1
 const CACHE_STORE = "cache"
 const DRAFT_STORE = "drafts"
 const PENDING_STORE = "pendingInterviews"
-const QUESTIONS_CACHE_KEY = "activeQuestions"
+const FORM_CACHE_KEY = "activeInterviewForm"
 const CURRENT_DRAFT_ID = "currentInterview"
 const pendingInterviewsChanged = new EventTarget()
 
@@ -23,6 +24,7 @@ export type InterviewDraft = {
   id: typeof CURRENT_DRAFT_ID
   candidate: CandidateDetails
   answers: Record<number, AnswerValue>
+  practicalTaskAnswers?: PracticalTaskAnswers
   step: number
   updatedAt: string
 }
@@ -31,6 +33,7 @@ export type PendingInterview = {
   clientSubmissionId: string
   candidate: CandidateDetails
   answers: Record<number, AnswerValue>
+  practicalTaskAnswers?: PracticalTaskAnswers
   createdAt: string
   attempts: number
   lastError?: string
@@ -102,23 +105,23 @@ function openDatabase(): Promise<IDBDatabase> {
   return databasePromise
 }
 
-export async function cacheInterviewQuestions(questions: InterviewQuestion[]) {
+export async function cacheInterviewFormDefinition(definition: InterviewFormDefinition) {
   const database = await openDatabase()
   const transaction = database.transaction(CACHE_STORE, "readwrite")
   transaction.objectStore(CACHE_STORE).put({
-    key: QUESTIONS_CACHE_KEY,
-    value: questions,
+    key: FORM_CACHE_KEY,
+    value: definition,
     updatedAt: new Date().toISOString(),
-  } satisfies CacheRecord<InterviewQuestion[]>)
+  } satisfies CacheRecord<InterviewFormDefinition>)
   await transactionComplete(transaction)
 }
 
-export async function getCachedInterviewQuestions() {
+export async function getCachedInterviewFormDefinition() {
   const database = await openDatabase()
   const transaction = database.transaction(CACHE_STORE, "readonly")
   const record = await requestResult(
-    transaction.objectStore(CACHE_STORE).get(QUESTIONS_CACHE_KEY),
-  ) as CacheRecord<InterviewQuestion[]> | undefined
+    transaction.objectStore(CACHE_STORE).get(FORM_CACHE_KEY),
+  ) as CacheRecord<InterviewFormDefinition> | undefined
   await transactionComplete(transaction)
   return record?.value ?? null
 }

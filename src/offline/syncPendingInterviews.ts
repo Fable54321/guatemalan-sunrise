@@ -32,6 +32,7 @@ async function runSync(): Promise<SyncResult> {
       await createInterview(
         interview.candidate,
         interview.answers,
+        interview.practicalTaskAnswers ?? {},
         interview.clientSubmissionId,
       )
       await removePendingInterview(interview.clientSubmissionId)

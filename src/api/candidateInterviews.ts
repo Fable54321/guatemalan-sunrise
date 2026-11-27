@@ -2,7 +2,8 @@ export type AnswerType = "boolean" | "integer" | "rating" | "select" | "text"
 
 export type InterviewQuestion = {
   id: number
-  section: string
+  section_id: number
+  section_code: string
   question_text: string
   answer_type: AnswerType
   options: string[] | { min?: number; max?: number } | null
@@ -10,7 +11,30 @@ export type InterviewQuestion = {
   is_required: boolean
 }
 
+export type InterviewSection = {
+  id: number
+  code: string
+  name: string
+  display_order: number
+}
+
+export type PracticalTask = {
+  id: string
+  section_id: number
+  section_code: string
+  description: string
+  display_order: number
+}
+
+export type InterviewFormDefinition = {
+  sections: InterviewSection[]
+  questions: InterviewQuestion[]
+  practical_tasks: PracticalTask[]
+}
+
 export type AnswerValue = boolean | number | string
+export type QuestionAnswers = Record<number, AnswerValue>
+export type PracticalTaskAnswers = Record<string, number>
 
 export type CandidateDetails = {
   candidateNumber: string
@@ -60,12 +84,13 @@ export async function getInterviewQuestions(signal?: AbortSignal) {
     signal,
   })
 
-  return parseResponse<{ questions: InterviewQuestion[] }>(response)
+  return parseResponse<InterviewFormDefinition>(response)
 }
 
 export async function createInterview(
   candidate: CandidateDetails,
-  answers: Record<number, AnswerValue>,
+  answers: QuestionAnswers,
+  practicalTaskAnswers: PracticalTaskAnswers,
   clientSubmissionId: string,
 ) {
   const response = await fetch(`${apiBaseUrl}/candidate-interviews`, {
@@ -79,10 +104,16 @@ export async function createInterview(
       phone_number_1: candidate.phoneNumber1,
       phone_number_2: candidate.phoneNumber2,
       client_submission_id: clientSubmissionId,
-      answers: Object.entries(answers).map(([questionId, value]) => ({
-        question_id: Number(questionId),
-        value,
-      })),
+      answers: [
+        ...Object.entries(answers).map(([questionId, value]) => ({
+          question_id: Number(questionId),
+          value,
+        })),
+        ...Object.entries(practicalTaskAnswers).map(([practicalTaskId, value]) => ({
+          practical_task_id: practicalTaskId,
+          value,
+        })),
+      ],
     }),
   })
 
