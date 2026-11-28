@@ -332,6 +332,7 @@ export default function InterviewForm() {
   const [lastName, setLastName] = useState("")
   const [phoneNumber1, setPhoneNumber1] = useState("")
   const [phoneNumber2, setPhoneNumber2] = useState("")
+  const [generalInformationComment, setGeneralInformationComment] = useState("")
   const [step, setStep] = useState(0)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
@@ -400,6 +401,7 @@ export default function InterviewForm() {
         setLastName(draft.candidate.lastName)
         setPhoneNumber1(draft.candidate.phoneNumber1)
         setPhoneNumber2(draft.candidate.phoneNumber2)
+        setGeneralInformationComment(draft.generalInformationComment ?? "")
         setAnswers(draft.answers)
         setPracticalTaskAnswers(draft.practicalTaskAnswers ?? {})
         setStep(Math.max(0, draft.step))
@@ -428,6 +430,7 @@ export default function InterviewForm() {
         },
         answers,
         practicalTaskAnswers,
+        generalInformationComment,
         step,
       }).catch(() => undefined)
     }, 400)
@@ -439,6 +442,7 @@ export default function InterviewForm() {
     completionStatus,
     draftReady,
     firstName,
+    generalInformationComment,
     lastName,
     phoneNumber1,
     phoneNumber2,
@@ -560,7 +564,8 @@ export default function InterviewForm() {
 
   const goForward = () => {
     setPageError("")
-    if (!validateCurrentStep()) return
+    // Temporary: allow interviewers to move between steps without completing fields.
+    setFieldErrors({})
     setStep((current) => Math.min(current + 1, totalSteps - 1))
     window.scrollTo({ top: 0, behavior: "smooth" })
   }
@@ -587,6 +592,7 @@ export default function InterviewForm() {
         candidate,
         answers: submittedAnswers,
         practicalTaskAnswers,
+        generalInformationComment: generalInformationComment.trim(),
         createdAt: new Date().toISOString(),
         attempts: 0,
       })
@@ -607,6 +613,7 @@ export default function InterviewForm() {
         submittedAnswers,
         practicalTaskAnswers,
         clientSubmissionId,
+        generalInformationComment,
       )
       await clearInterviewDraft()
       setCompletionStatus("saved")
@@ -859,6 +866,25 @@ export default function InterviewForm() {
                     onChange={(value) => updatePracticalTaskAnswer(item.field.id, value)}
                   />
                 ))}
+                {currentSection?.code === "general_information" && (
+                  <div className="rounded-2xl border border-[#dfe8d8] bg-white p-5 transition-colors focus-within:border-[#668f20] sm:p-6">
+                    <label
+                      htmlFor="general-information-comment"
+                      className="mb-4 block text-base font-semibold leading-6 text-[#24351e]"
+                    >
+                      Commentaires
+                    </label>
+                    <textarea
+                      id="general-information-comment"
+                      rows={4}
+                      maxLength={5000}
+                      value={generalInformationComment}
+                      onChange={(event) => setGeneralInformationComment(event.target.value)}
+                      placeholder="Indiquez toute autre information familiale pertinente ici"
+                      className="w-full resize-y rounded-xl border border-[#d9e3d2] bg-[#fbfcfa] px-4 py-3 text-base leading-6 text-[#24351e] outline-none transition placeholder:text-[#99a295] focus:border-[#668f20] focus:ring-4 focus:ring-[#668f20]/10"
+                    />
+                  </div>
+                )}
               </div>
             )}
 

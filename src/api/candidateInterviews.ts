@@ -92,6 +92,7 @@ export async function createInterview(
   answers: QuestionAnswers,
   practicalTaskAnswers: PracticalTaskAnswers,
   clientSubmissionId: string,
+  generalInformationComment = "",
 ) {
   const response = await fetch(`${apiBaseUrl}/candidate-interviews`, {
     method: "POST",
@@ -103,6 +104,7 @@ export async function createInterview(
       last_name: candidate.lastName,
       phone_number_1: candidate.phoneNumber1,
       phone_number_2: candidate.phoneNumber2,
+      general_information_comment: generalInformationComment.trim(),
       client_submission_id: clientSubmissionId,
       answers: [
         ...Object.entries(answers).map(([questionId, value]) => ({

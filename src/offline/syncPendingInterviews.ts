@@ -34,6 +34,7 @@ async function runSync(): Promise<SyncResult> {
         interview.answers,
         interview.practicalTaskAnswers ?? {},
         interview.clientSubmissionId,
+        interview.generalInformationComment ?? "",
       )
       await removePendingInterview(interview.clientSubmissionId)
       synced += 1

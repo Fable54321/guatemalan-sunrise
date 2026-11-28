@@ -25,6 +25,7 @@ export type InterviewDraft = {
   candidate: CandidateDetails
   answers: Record<number, AnswerValue>
   practicalTaskAnswers?: PracticalTaskAnswers
+  generalInformationComment?: string
   step: number
   updatedAt: string
 }
@@ -34,6 +35,7 @@ export type PendingInterview = {
   candidate: CandidateDetails
   answers: Record<number, AnswerValue>
   practicalTaskAnswers?: PracticalTaskAnswers
+  generalInformationComment?: string
   createdAt: string
   attempts: number
   lastError?: string
