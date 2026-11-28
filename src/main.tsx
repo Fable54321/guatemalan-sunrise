@@ -5,6 +5,8 @@ import App from './App/000--App/App'
 import { createBrowserRouter, RouterProvider } from 'react-router-dom'
 import Home from './App/100--Home/Home'
 import InterviewForm from './App/200--Interview/InterviewForm'
+import CandidatePhotos from './App/300--CandidatePhotos/CandidatePhotos'
+import LocalArchives from './App/400--LocalArchives/LocalArchives'
 
 const router = createBrowserRouter(
   [
@@ -19,6 +21,14 @@ const router = createBrowserRouter(
         {
           path: "interviews/new",
           element: <InterviewForm />
+        },
+        {
+          path: "candidate-photos",
+          element: <CandidatePhotos />
+        },
+        {
+          path: "local-archives",
+          element: <LocalArchives />
         }
       ]
     }

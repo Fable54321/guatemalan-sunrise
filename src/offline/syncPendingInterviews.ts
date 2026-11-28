@@ -4,6 +4,7 @@ import {
   markPendingInterviewAttempt,
   removePendingInterview,
 } from "./interviewDb"
+import { updateNativePackageStatus } from "../native/nativeArchive"
 
 export type SyncResult = {
   synced: number
@@ -29,17 +30,22 @@ async function runSync(): Promise<SyncResult> {
     }
 
     try {
-      await createInterview(
+      await updateNativePackageStatus(interview.clientSubmissionId, "syncing")
+      const result = await createInterview(
         interview.candidate,
         interview.answers,
         interview.practicalTaskAnswers ?? {},
         interview.clientSubmissionId,
         interview.generalInformationComment ?? "",
       )
+      await updateNativePackageStatus(interview.clientSubmissionId, "synced", {
+        serverId: result.interview.id,
+      })
       await removePendingInterview(interview.clientSubmissionId)
       synced += 1
     } catch (error) {
       const message = error instanceof Error ? error.message : "Synchronization failed."
+      await updateNativePackageStatus(interview.clientSubmissionId, "failed", { error: message })
       await markPendingInterviewAttempt(interview, message)
 
       if (!(error instanceof ApiError) || error.status === 401 || error.status >= 500) {

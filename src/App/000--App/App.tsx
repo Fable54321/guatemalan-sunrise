@@ -5,6 +5,10 @@ import {
   subscribeToPendingInterviews,
 } from "../../offline/interviewDb"
 import { warmInterviewQuestionsCache } from "../../offline/interviewQuestionsCache"
+import { App as CapacitorApp } from "@capacitor/app"
+import { Capacitor, type PluginListenerHandle } from "@capacitor/core"
+import { Network } from "@capacitor/network"
+import { syncNativeArchive } from "../../native/syncNativeArchive"
 
 function App() {
   const [savedInterviewCount, setSavedInterviewCount] = useState(0)
@@ -18,6 +22,30 @@ function App() {
     window.addEventListener("online", warmCache)
 
     return () => window.removeEventListener("online", warmCache)
+  }, [])
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return
+    let active = true
+    let networkListener: PluginListenerHandle | undefined
+    let appListener: PluginListenerHandle | undefined
+
+    const initializeNativeSync = async () => {
+      networkListener = await Network.addListener("networkStatusChange", (status) => {
+        if (status.connected) void syncNativeArchive()
+      })
+      appListener = await CapacitorApp.addListener("appStateChange", (state) => {
+        if (state.isActive) void syncNativeArchive()
+      })
+      if (active) await syncNativeArchive()
+    }
+    void initializeNativeSync()
+
+    return () => {
+      active = false
+      void networkListener?.remove()
+      void appListener?.remove()
+    }
   }, [])
 
   useEffect(() => {

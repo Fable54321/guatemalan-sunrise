@@ -19,6 +19,13 @@ import {
 } from "../../offline/interviewDb"
 import { refreshInterviewQuestionsCache } from "../../offline/interviewQuestionsCache"
 import { syncPendingInterviews } from "../../offline/syncPendingInterviews"
+import {
+  archiveInterview,
+  archiveInterviewDraft,
+  deleteNativeInterviewDraft,
+  getNativeInterviewDraft,
+  updateNativePackageStatus,
+} from "../../native/nativeArchive"
 
 const sectionLabels: Record<string, { title: string; eyebrow: string }> = {
   group_meeting: { title: "Rencontre de groupe", eyebrow: "" },
@@ -394,6 +401,7 @@ export default function InterviewForm() {
     let active = true
 
     getInterviewDraft()
+      .then(async (draft) => draft ?? await getNativeInterviewDraft())
       .then((draft) => {
         if (!active || !draft) return
         setCandidateNumber(draft.candidate.candidateNumber)
@@ -420,7 +428,14 @@ export default function InterviewForm() {
     if (!draftReady || completionStatus) return
 
     const saveTimer = window.setTimeout(() => {
-      void saveInterviewDraft({
+      const candidate = {
+        candidateNumber,
+        firstName,
+        lastName,
+        phoneNumber1,
+        phoneNumber2,
+      }
+      void Promise.all([saveInterviewDraft({
         candidate: {
           candidateNumber,
           firstName,
@@ -432,7 +447,13 @@ export default function InterviewForm() {
         practicalTaskAnswers,
         generalInformationComment,
         step,
-      }).catch(() => undefined)
+      }), archiveInterviewDraft({
+        candidate,
+        answers,
+        practicalTaskAnswers,
+        generalInformationComment,
+        step,
+      })]).catch(() => undefined)
     }, 400)
 
     return () => window.clearTimeout(saveTimer)
@@ -586,6 +607,18 @@ export default function InterviewForm() {
     if (otherJobDependency && !otherJobSelected) {
       delete submittedAnswers[otherJobDependency.detailId]
     }
+    try {
+      await archiveInterview({
+        id: clientSubmissionId,
+        candidate,
+        answers: submittedAnswers,
+        practicalTaskAnswers,
+        generalInformationComment,
+      })
+    } catch {
+      setPageError("Impossible d’enregistrer une copie locale durable. L’entrevue n’a pas été envoyée.")
+      return
+    }
     const saveForLater = async () => {
       await queueInterview({
         clientSubmissionId,
@@ -597,6 +630,7 @@ export default function InterviewForm() {
         attempts: 0,
       })
       await clearInterviewDraft()
+      await deleteNativeInterviewDraft()
       setPendingCount((current) => current + 1)
       setCompletionStatus("queued")
     }
@@ -608,17 +642,22 @@ export default function InterviewForm() {
         return
       }
 
-      await createInterview(
+      const result = await createInterview(
         candidate,
         submittedAnswers,
         practicalTaskAnswers,
         clientSubmissionId,
         generalInformationComment,
       )
+      await updateNativePackageStatus(clientSubmissionId, "synced", {
+        serverId: result.interview.id,
+      })
       await clearInterviewDraft()
+      await deleteNativeInterviewDraft()
       setCompletionStatus("saved")
     } catch (error) {
       if (error instanceof ApiError) {
+        await updateNativePackageStatus(clientSubmissionId, "failed", { error: error.message })
         setFieldErrors((current) => ({ ...current, ...error.fieldErrors }))
         setPageError(error.message)
       } else {

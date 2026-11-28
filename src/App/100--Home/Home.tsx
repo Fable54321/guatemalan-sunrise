@@ -38,7 +38,7 @@ const Home = () => (
             </span>
           </Link>
 
-          <div className="rounded-[1.75rem] border border-[#dbe5d4] bg-white/75 p-6 text-[#35482e] shadow-[0_14px_40px_rgba(43,70,28,0.60)] backdrop-blur sm:p-8">
+          <Link to="/candidate-photos" className="group block rounded-[1.75rem] border border-[#dbe5d4] bg-white/75 p-6 text-[#35482e] shadow-[0_14px_40px_rgba(43,70,28,0.60)] backdrop-blur transition hover:-translate-y-1 sm:p-8">
             <span className="mb-6 grid h-12 w-12 place-items-center rounded-2xl bg-[#edf3e7] text-[#668f20]">
               <svg
                 viewBox="0 0 24 24"
@@ -58,7 +58,10 @@ const Home = () => (
             <span className="mt-2 block text-xl font-black tracking-tight sm:text-4xl">
               Téléverser les photos des candidats
             </span>
-          </div>
+          </Link>
+          <Link to="/local-archives" className="block rounded-2xl border border-[#dbe5d4] bg-white px-5 py-4 text-center text-lg font-black text-[#35482e] shadow-sm">
+            Archives locales
+          </Link>
         </div>
       </section>
     </div>
